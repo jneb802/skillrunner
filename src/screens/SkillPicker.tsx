@@ -7,9 +7,10 @@ import type { Skill } from '../types.js'
 interface Props {
   repoPath: string
   onSelect: (skill: Skill) => void
+  onConfigure: () => void
 }
 
-export function SkillPicker({ repoPath, onSelect }: Props) {
+export function SkillPicker({ repoPath, onSelect, onConfigure }: Props) {
   const [skills, setSkills] = useState<Skill[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
@@ -43,10 +44,15 @@ export function SkillPicker({ repoPath, onSelect }: Props) {
     )
   }
 
-  const options = skills.map((skill) => ({
-    label: `${skill.name}${skill.description ? ` — ${skill.description.slice(0, 60)}` : ''}`,
-    value: skill.skillPath,
-  }))
+  const CONFIGURE_VALUE = '__configure__'
+
+  const options = [
+    ...skills.map((skill) => ({
+      label: `${skill.name}${skill.description ? ` — ${skill.description.slice(0, 60)}` : ''}`,
+      value: skill.skillPath,
+    })),
+    { label: '⚙ Configure OpenRouter...', value: CONFIGURE_VALUE },
+  ]
 
   return (
     <Box flexDirection="column">
@@ -55,8 +61,12 @@ export function SkillPicker({ repoPath, onSelect }: Props) {
       <Select
         options={options}
         onChange={(value) => {
-          const skill = skills.find((s) => s.skillPath === value)
-          if (skill) onSelect(skill)
+          if (value === CONFIGURE_VALUE) {
+            onConfigure()
+          } else {
+            const skill = skills.find((s) => s.skillPath === value)
+            if (skill) onSelect(skill)
+          }
         }}
       />
     </Box>

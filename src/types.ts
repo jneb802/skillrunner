@@ -64,6 +64,7 @@ export interface RunState {
 }
 
 export type AppScreen =
+  | 'config-wizard'
   | 'skill-picker'
   | 'agent-picker'
   | 'model-picker'
@@ -72,6 +73,8 @@ export type AppScreen =
   | 'done'
 
 export type AppAction =
+  | { type: 'WIZARD_DONE' }
+  | { type: 'OPEN_WIZARD' }
   | { type: 'SELECT_SKILL'; skill: Skill }
   | { type: 'SELECT_AGENT'; agent: AgentConfig }
   | { type: 'SELECT_MODEL'; model: ModelInfo }

@@ -10,11 +10,13 @@ import { ModelPicker } from './screens/ModelPicker.js'
 import { ConfigReview } from './screens/ConfigReview.js'
 import { Running } from './screens/Running.js'
 import { Done } from './screens/Done.js'
+import { ConfigWizard } from './screens/ConfigWizard.js'
 import { GitService } from './services/gitService.js'
 import { GithubService } from './services/githubService.js'
 import { DockerImageBuilder } from './services/dockerService.js'
 import { AgentRunner } from './services/agentService.js'
 import { detectDockerTemplate } from './services/dockerService.js'
+import { configExists } from './services/configService.js'
 
 function makeTimestamp(): string {
   const now = new Date()
@@ -53,6 +55,12 @@ function buildSessionConfig(
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
+    case 'WIZARD_DONE':
+      return { ...state, screen: 'skill-picker' }
+
+    case 'OPEN_WIZARD':
+      return { ...state, screen: 'config-wizard' }
+
     case 'SELECT_SKILL':
       return { ...state, screen: 'agent-picker', skill: action.skill }
 
@@ -150,7 +158,7 @@ function reducer(state: AppState, action: AppAction): AppState {
 
 function initState(repoPath: string): AppState {
   return {
-    screen: 'skill-picker',
+    screen: configExists() ? 'skill-picker' : 'config-wizard',
     repoPath,
     repoName: basename(repoPath),
   }
@@ -341,11 +349,17 @@ export function App({ repoPath }: Props) {
   }
 
   switch (state.screen) {
+    case 'config-wizard':
+      return (
+        <ConfigWizard onDone={() => dispatch({ type: 'WIZARD_DONE' })} />
+      )
+
     case 'skill-picker':
       return (
         <SkillPicker
           repoPath={state.repoPath}
           onSelect={(skill: Skill) => dispatch({ type: 'SELECT_SKILL', skill })}
+          onConfigure={() => dispatch({ type: 'OPEN_WIZARD' })}
         />
       )
 
