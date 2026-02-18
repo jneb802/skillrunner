@@ -202,11 +202,15 @@ export class AgentRunner {
     onUpdate({ type: 'phase', phase: 'running' })
     onUpdate({ type: 'output', text: `Running skill: ${config.skill.name}\n` })
 
-    await connection.prompt({
-      sessionId: sessionId ?? '',
-      prompt: [{ type: 'text', text: config.skill.raw }],
-    })
-
-    await connection.closed
+    try {
+      await connection.prompt({
+        sessionId: sessionId ?? '',
+        prompt: [{ type: 'text', text: config.skill.raw }],
+      })
+    } finally {
+      // prompt() returns when the turn is complete; kill the process so
+      // the stream closes rather than blocking indefinitely on more input
+      try { proc.kill('SIGTERM') } catch { /* ignore */ }
+    }
   }
 }
