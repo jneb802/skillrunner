@@ -314,7 +314,18 @@ export function App({ repoPath }: Props) {
       } catch (err) {
         if (ctrl.signal.aborted) return
         flushOutput()
-        dispatch({ type: 'ERROR', message: err instanceof Error ? err.message : String(err) })
+        let message: string
+        if (err instanceof Error) {
+          message = err.message
+        } else if (err && typeof err === 'object') {
+          const o = err as Record<string, unknown>
+          message = typeof o['message'] === 'string'
+            ? o['message']
+            : JSON.stringify(err)
+        } else {
+          message = String(err)
+        }
+        dispatch({ type: 'ERROR', message })
       }
     }
 

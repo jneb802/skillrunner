@@ -3,6 +3,7 @@ import { Writable, Readable } from 'stream'
 import * as acp from '@agentclientprotocol/sdk'
 import type { SessionConfig, ToolCallRecord } from '../types.js'
 import { spawnAgentInDocker } from './dockerService.js'
+import { loadConfig } from './configService.js'
 
 export interface AgentUpdate {
   type: 'output' | 'tool-start' | 'tool-done' | 'tool-error' | 'phase'
@@ -11,10 +12,24 @@ export interface AgentUpdate {
   phase?: string
 }
 
-function buildEnv(config: SessionConfig): Record<string, string> {
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const o = err as Record<string, unknown>
+    if (typeof o['message'] === 'string') return o['message']
+    if (o['error'] && typeof o['error'] === 'object') {
+      const inner = o['error'] as Record<string, unknown>
+      if (typeof inner['message'] === 'string') return inner['message']
+    }
+    return JSON.stringify(err)
+  }
+  return String(err)
+}
+
+async function buildEnv(config: SessionConfig): Promise<Record<string, string>> {
   const base: Record<string, string> = {}
 
-  // Copy relevant env vars
+  // Copy relevant env vars from the current process
   for (const key of [
     'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY',
     'OPENROUTER_API_KEY', 'PATH', 'HOME', 'USER',
@@ -23,8 +38,13 @@ function buildEnv(config: SessionConfig): Record<string, string> {
     if (val) base[key] = val
   }
 
+  // Also read OpenRouter API key from config file (overrides env if set)
+  const fileConfig = await loadConfig()
+  const fileKey = fileConfig.openrouter?.api_key
+  if (fileKey) base['OPENROUTER_API_KEY'] = fileKey
+
   const modelId = config.model.id
-  const openRouterKey = process.env.OPENROUTER_API_KEY
+  const openRouterKey = base['OPENROUTER_API_KEY']
 
   // If model ID contains '/' it's an OpenRouter model (e.g. "anthropic/claude-opus-4")
   if (modelId.includes('/') && openRouterKey) {
@@ -32,6 +52,9 @@ function buildEnv(config: SessionConfig): Record<string, string> {
     base['ANTHROPIC_API_KEY'] = openRouterKey
     base['OPENAI_BASE_URL'] = 'https://openrouter.ai/api/v1'
     base['OPENAI_API_KEY'] = openRouterKey
+    // Goose native OpenRouter support
+    base['GOOSE_PROVIDER'] = 'openrouter'
+    base['GOOSE_MODEL'] = modelId
   }
 
   return base
@@ -63,7 +86,7 @@ export class AgentRunner {
   ): Promise<void> {
     if (!config.worktreePath) throw new Error('worktreePath not set in SessionConfig')
 
-    const env = buildEnv(config)
+    const env = await buildEnv(config)
     const { command, args } = agentCommandAndArgs(config)
 
     const proc = config.useDocker
