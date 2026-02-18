@@ -26,7 +26,10 @@ export function Running({ runState, onCancel }: Props) {
     }
   })
 
-  const lastLines = runState.output.slice(-20)
+  const displayLines = [
+    ...runState.output,
+    ...(runState.partialLine ? [runState.partialLine] : []),
+  ].slice(-20)
   const activeTools = runState.toolCalls.filter((t) => t.status === 'running')
 
   return (
@@ -42,7 +45,7 @@ export function Running({ runState, onCancel }: Props) {
         </Box>
       )}
 
-      {lastLines.length > 0 && (
+      {displayLines.length > 0 && (
         <Box flexDirection="column">
           <Text dimColor bold>Output (last 20 lines):</Text>
           <Box
@@ -51,7 +54,7 @@ export function Running({ runState, onCancel }: Props) {
             borderColor="gray"
             paddingX={1}
           >
-            {lastLines.map((line, i) => (
+            {displayLines.map((line, i) => (
               <Text key={i} wrap="truncate-end">{line}</Text>
             ))}
           </Box>

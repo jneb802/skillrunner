@@ -58,6 +58,7 @@ export interface ToolCallRecord {
 export interface RunState {
   phase: RunPhase
   output: string[]
+  partialLine?: string  // current incomplete line being streamed
   toolCalls: ToolCallRecord[]
   error?: string
 }

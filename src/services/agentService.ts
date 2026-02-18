@@ -114,41 +114,41 @@ export class AgentRunner {
 
     const clientImpl: acp.Client = {
       async sessionUpdate(params: acp.SessionNotification): Promise<void> {
-        const update = (params as any).update ?? params
-        const updateType = (update as any).type ?? (update as any).sessionUpdate
+        const update = params.update
+        const kind = update.sessionUpdate
 
-        if (updateType === 'agent_message_chunk' || updateType === 'message_chunk') {
-          const content = (update as any).content
-          const text = content?.text ?? (typeof content === 'string' ? content : '')
+        if (kind === 'agent_message_chunk') {
+          // ContentChunk: update.content is a ContentBlock
+          const block = (update as any).content
+          const text: string =
+            block?.type === 'text' ? block.text :
+            typeof block === 'string' ? block : ''
           if (text) {
             onUpdate({ type: 'output', text })
           }
-        } else if (updateType === 'tool_call' || updateType === 'tool_use') {
-          const toolUse = (update as any).toolUse ?? (update as any).tool_use ?? update
-          const toolId = (toolUse as any).id ?? String(Date.now())
-          const toolName = (toolUse as any).name ?? 'unknown'
-          const toolStatus = (toolUse as any).status ?? 'running'
-
-          if (toolStatus === 'running' || toolStatus === 'started') {
-            onUpdate({
-              type: 'tool-start',
-              toolCall: {
-                id: toolId,
-                name: toolName,
-                status: 'running',
-                input: (toolUse as any).input,
-              },
-            })
-          } else if (toolStatus === 'done' || toolStatus === 'completed') {
-            onUpdate({
-              type: 'tool-done',
-              toolCall: { id: toolId, name: toolName, status: 'done' },
-            })
-          } else if (toolStatus === 'error') {
-            onUpdate({
-              type: 'tool-error',
-              toolCall: { id: toolId, name: toolName, status: 'error' },
-            })
+        } else if (kind === 'tool_call') {
+          // ToolCall: update.toolCallId, update.title, update.status
+          const u = update as any
+          const id: string = u.toolCallId ?? String(Date.now())
+          const name: string = u.title ?? 'tool'
+          const status: string = u.status ?? 'in_progress'
+          if (status === 'in_progress' || status === 'pending') {
+            onUpdate({ type: 'tool-start', toolCall: { id, name, status: 'running' } })
+          } else if (status === 'completed') {
+            onUpdate({ type: 'tool-done', toolCall: { id, name, status: 'done' } })
+          } else if (status === 'failed') {
+            onUpdate({ type: 'tool-error', toolCall: { id, name, status: 'error' } })
+          }
+        } else if (kind === 'tool_call_update') {
+          // ToolCallUpdate: update.toolCallId, update.status, update.title
+          const u = update as any
+          const id: string = u.toolCallId ?? String(Date.now())
+          const name: string = u.title ?? 'tool'
+          const status: string = u.status ?? ''
+          if (status === 'completed') {
+            onUpdate({ type: 'tool-done', toolCall: { id, name, status: 'done' } })
+          } else if (status === 'failed') {
+            onUpdate({ type: 'tool-error', toolCall: { id, name, status: 'error' } })
           }
         }
       },
@@ -198,7 +198,8 @@ export class AgentRunner {
       }
     }
 
-    // Send the skill prompt
+    // Signal running phase and send the skill prompt
+    onUpdate({ type: 'phase', phase: 'running' })
     onUpdate({ type: 'output', text: `Running skill: ${config.skill.name}\n` })
 
     await connection.prompt({

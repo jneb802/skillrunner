@@ -97,13 +97,20 @@ function reducer(state: AppState, action: AppAction): AppState {
       }
 
       let output = prevRun.output
-      if (patch.output !== undefined) {
+      if (patch.output !== undefined && patch.output.length > 0) {
         output = [...prevRun.output, ...patch.output]
       }
 
       return {
         ...state,
-        runState: { ...prevRun, ...patch, toolCalls, output },
+        runState: {
+          ...prevRun,
+          ...patch,
+          toolCalls,
+          output,
+          // partialLine: use patch value if present, keep prev otherwise
+          partialLine: 'partialLine' in patch ? patch.partialLine : prevRun.partialLine,
+        },
       }
     }
 
@@ -156,21 +163,29 @@ interface Props {
 export function App({ repoPath }: Props) {
   const [state, dispatch] = useReducer(reducer, repoPath, initState)
   const abortRef = useRef<AbortController | null>(null)
-  const outputBuffer = useRef<string[]>([])
+  // completed lines waiting to be flushed to state
+  const completedBuffer = useRef<string[]>([])
+  // current line being built (no newline yet)
+  const partialLineRef = useRef('')
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function flushOutput() {
-    if (outputBuffer.current.length > 0) {
-      dispatch({
-        type: 'UPDATE_RUN',
-        patch: { output: outputBuffer.current.splice(0) },
-      })
+    const lines = completedBuffer.current.splice(0)
+    const partial = partialLineRef.current || undefined
+    if (lines.length > 0 || partial !== undefined) {
+      dispatch({ type: 'UPDATE_RUN', patch: { output: lines, partialLine: partial } })
     }
   }
 
   function queueOutput(text: string) {
-    const lines = text.split('\n')
-    outputBuffer.current.push(...lines.filter((l) => l.length > 0))
+    if (!text) return
+    const combined = partialLineRef.current + text
+    const parts = combined.split('\n')
+    // last part is the new partial (may be '')
+    partialLineRef.current = parts[parts.length - 1]
+    // everything before the last part is complete lines
+    completedBuffer.current.push(...parts.slice(0, -1))
+
     if (!flushTimer.current) {
       flushTimer.current = setTimeout(() => {
         flushOutput()
