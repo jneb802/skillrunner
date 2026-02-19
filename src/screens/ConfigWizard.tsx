@@ -134,9 +134,9 @@ export function ConfigWizard({ onDone }: Props) {
         <Box flexDirection="column" gap={1}>
           <Text bold>Step 4/4 — Confirm</Text>
           <Box flexDirection="column" borderStyle="round" paddingX={1}>
-            <Text dimColor>API key: <Text color="white">{apiKey ? '***' + apiKey.slice(-4) : '(not set)'}</Text></Text>
-            <Text dimColor>Proxy:   <Text color="white">{proxyUrl || '(not set)'}</Text></Text>
-            <Text dimColor>Models: <Text color="white">{models.length === 0 ? '(none)' : ''}</Text></Text>
+            <Text dimColor>API key: <Text>{apiKey ? '***' + apiKey.slice(-4) : '(not set)'}</Text></Text>
+            <Text dimColor>Proxy:   <Text>{proxyUrl || '(not set)'}</Text></Text>
+            <Text dimColor>Models: <Text>{models.length === 0 ? '(none)' : ''}</Text></Text>
             {models.map((m) => (
               <Text key={m.id}>  <Text color="green">{m.id}</Text> — {m.name}</Text>
             ))}

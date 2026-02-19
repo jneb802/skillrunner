@@ -30,10 +30,10 @@ export function Done({ config, prUrl, error }: Props) {
         </>
       )}
       <Box flexDirection="column" borderStyle="round" paddingX={1}>
-        <Text dimColor>Skill:  <Text color="white">{config.skill.name}</Text></Text>
-        <Text dimColor>Agent:  <Text color="white">{config.agent.label}</Text></Text>
-        <Text dimColor>Model:  <Text color="white">{config.model.name}</Text></Text>
-        <Text dimColor>Branch: <Text color="white">{config.branchName}</Text></Text>
+        <Text dimColor>Skill:  <Text color="green">{config.skill.name}</Text></Text>
+        <Text dimColor>Agent:  <Text color="green">{config.agent.label}</Text></Text>
+        <Text dimColor>Model:  <Text color="green">{config.model.name}</Text></Text>
+        <Text dimColor>Branch: <Text color="green">{config.branchName}</Text></Text>
       </Box>
       <Text dimColor>Press Ctrl+C to exit</Text>
     </Box>
