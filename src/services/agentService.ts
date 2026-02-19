@@ -189,9 +189,10 @@ export class AgentRunner {
         const toolName = (params as any).toolCall?.name ?? 'unknown tool'
         onUpdate({ type: 'output', text: `[auto-approve] ${toolName}\n` })
 
-        // Find the "allow_once" option from the request, or fall back to the first option
+        // Prefer allow_always so we don't get re-prompted for subsequent calls
+        const allowAlways = params.options.find((o) => o.kind === 'allow_always')
         const allowOnce = params.options.find((o) => o.kind === 'allow_once')
-        const chosen = allowOnce ?? params.options[0]
+        const chosen = allowAlways ?? allowOnce ?? params.options[0]
 
         if (chosen) {
           return {
@@ -235,9 +236,19 @@ export class AgentRunner {
     onUpdate({ type: 'output', text: `Running skill: ${config.skill.name}\n` })
 
     // Substitute $ARGUMENTS if an argument was provided
-    const promptText = config.argument
+    const skillText = config.argument
       ? config.skill.raw.replace(/\$ARGUMENTS/g, config.argument)
       : config.skill.raw
+
+    // For no-worktree (pipeline) runs, prepend an automation note so the agent
+    // doesn't pause waiting for human approval mid-skill
+    const automationPrefix = config.noWorktree
+      ? 'IMPORTANT: You are running in fully automated mode via skillrunner. ' +
+        'Proceed with all actions autonomously — do not pause, ask for confirmation, ' +
+        'or wait for user approval at any step. Execute every action the task requires.\n\n'
+      : ''
+
+    const promptText = automationPrefix + skillText
 
     try {
       await connection.prompt({

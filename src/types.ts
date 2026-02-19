@@ -42,6 +42,14 @@ export interface SessionConfig {
   noWorktree?: boolean
 }
 
+export interface PipelineStepState {
+  name: string
+  output: string[]
+  partialLine?: string
+  toolCalls: ToolCallRecord[]
+  status: 'pending' | 'running' | 'done' | 'error'
+}
+
 export type RunPhase =
   | 'creating-worktree'
   | 'building-docker'
@@ -66,6 +74,8 @@ export interface RunState {
   partialLine?: string  // current incomplete line being streamed
   toolCalls: ToolCallRecord[]
   error?: string
+  steps?: PipelineStepState[]
+  currentStepIndex?: number
 }
 
 export type RunStatus = 'pending' | 'running' | 'done' | 'error' | 'cancelled'

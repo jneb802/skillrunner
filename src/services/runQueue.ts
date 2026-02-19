@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import type { SessionConfig, QueuedRun, QueueSnapshot, RunStore, RunState } from '../types.js'
+import type { SessionConfig, QueuedRun, QueueSnapshot, RunStore, RunState, PipelineStepState } from '../types.js'
 import { GitService } from './gitService.js'
 import { GithubService } from './githubService.js'
 import { DockerImageBuilder } from './dockerService.js'
@@ -14,6 +14,7 @@ interface RunOutputBuffer {
   completedLines: string[]
   partialLine: string
   flushTimer: ReturnType<typeof setTimeout> | null
+  stepIndex?: number
 }
 
 interface RunQueueOptions {
@@ -151,14 +152,22 @@ export class RunQueue {
     })
   }
 
-  private makeAgentCallback(runId: string) {
+  private makeAgentCallback(runId: string, stepIndex?: number) {
     return (update: AgentUpdate) => {
       if (update.type === 'output' && update.text) {
-        this.queueOutput(runId, update.text)
+        this.queueOutput(runId, update.text, stepIndex)
       } else if (update.type === 'tool-start' && update.toolCall) {
-        this.updateRunState(runId, { phase: 'running', toolCalls: [update.toolCall] })
+        if (stepIndex !== undefined) {
+          this.updateStep(runId, stepIndex, { toolCalls: [update.toolCall] })
+        } else {
+          this.updateRunState(runId, { phase: 'running', toolCalls: [update.toolCall] })
+        }
       } else if ((update.type === 'tool-done' || update.type === 'tool-error') && update.toolCall) {
-        this.updateRunState(runId, { toolCalls: [update.toolCall] })
+        if (stepIndex !== undefined) {
+          this.updateStep(runId, stepIndex, { toolCalls: [update.toolCall] })
+        } else {
+          this.updateRunState(runId, { toolCalls: [update.toolCall] })
+        }
       }
     }
   }
@@ -171,18 +180,43 @@ export class RunQueue {
         ? config.skill.pipelineSteps
         : [config.skill]
 
+    const isPipeline = steps.length > 1
+
+    if (isPipeline) {
+      this.updateRunState(runId, {
+        steps: steps.map((s) => ({
+          name: s.name,
+          output: [],
+          toolCalls: [],
+          status: 'pending' as const,
+        })),
+        currentStepIndex: 0,
+      })
+    }
+
     for (let i = 0; i < steps.length; i++) {
       if (ctrl.signal.aborted) return
 
       const step = steps[i]
-      if (steps.length > 1) {
-        this.queueOutput(runId, `\n[${i + 1}/${steps.length}] ${step.name}`)
+
+      if (isPipeline) {
+        this.updateStep(runId, i, { status: 'running' })
+        this.updateRunState(runId, { currentStepIndex: i, phase: 'running' })
       }
 
       const stepConfig: SessionConfig = { ...config, skill: step }
       const runner = new AgentRunner()
-      await runner.run(stepConfig, this.makeAgentCallback(runId), ctrl.signal)
+      await runner.run(stepConfig, this.makeAgentCallback(runId, isPipeline ? i : undefined), ctrl.signal)
       this.flushOutput(runId)
+
+      if (isPipeline) {
+        this.updateStep(runId, i, {
+          status: ctrl.signal.aborted ? 'error' : 'done',
+          partialLine: undefined,
+        })
+      }
+
+      if (ctrl.signal.aborted) return
     }
 
     if (!ctrl.signal.aborted) {
@@ -352,10 +386,20 @@ export class RunQueue {
     this.notifyReact()
   }
 
-  private queueOutput(runId: string, text: string): void {
+  private queueOutput(runId: string, text: string, stepIndex?: number): void {
     if (!text) return
     const buf = this.outputBuffers.get(runId)
     if (!buf) return
+
+    // If routing to a different step, flush the current buffer first
+    if (stepIndex !== buf.stepIndex) {
+      if (buf.flushTimer) {
+        clearTimeout(buf.flushTimer)
+        buf.flushTimer = null
+      }
+      this.flushOutput(runId)
+      buf.stepIndex = stepIndex
+    }
 
     const combined = buf.partialLine + text
     const parts = combined.split('\n')
@@ -376,9 +420,54 @@ export class RunQueue {
 
     const lines = buf.completedLines.splice(0)
     const partial = buf.partialLine || undefined
-    if (lines.length > 0 || partial !== undefined) {
-      this.updateRunState(runId, { output: lines, partialLine: partial })
+
+    if (buf.stepIndex !== undefined) {
+      if (lines.length > 0 || partial !== undefined) {
+        this.updateStep(runId, buf.stepIndex, { output: lines, partialLine: partial })
+      }
+    } else {
+      if (lines.length > 0 || partial !== undefined) {
+        this.updateRunState(runId, { output: lines, partialLine: partial })
+      }
     }
+  }
+
+  private updateStep(runId: string, stepIndex: number, patch: Partial<PipelineStepState>): void {
+    const run = this.runs.get(runId)
+    if (!run || !run.runState.steps) return
+
+    const steps = [...run.runState.steps]
+    const prev = steps[stepIndex]
+    if (!prev) return
+
+    let toolCalls = prev.toolCalls
+    if (patch.toolCalls !== undefined) {
+      const updated = [...toolCalls]
+      for (const tc of patch.toolCalls) {
+        const idx = updated.findIndex((t) => t.id === tc.id)
+        if (idx >= 0) updated[idx] = { ...updated[idx], ...tc }
+        else updated.push(tc)
+      }
+      toolCalls = updated
+    }
+
+    let output = prev.output
+    if (patch.output !== undefined && patch.output.length > 0) {
+      output = [...prev.output, ...patch.output]
+    }
+
+    steps[stepIndex] = {
+      ...prev,
+      ...patch,
+      toolCalls,
+      output,
+      partialLine: 'partialLine' in patch ? patch.partialLine : prev.partialLine,
+    }
+
+    const updatedRunState: RunState = { ...run.runState, steps }
+    this.runs.set(runId, { ...run, runState: updatedRunState })
+    this.invalidateSnapshot()
+    this.notifyReact()
   }
 
   private invalidateSnapshot(): void {
