@@ -73,7 +73,7 @@ function agentCommandAndArgs(config: SessionConfig): { command: string; args: st
   const { kind } = config.agent
   switch (kind) {
     case 'claude':
-      return { command: 'claude-code-acp', args: [] }
+      return { command: 'claude-code-acp', args: ['--dangerously-skip-permissions'] }
     case 'gemini':
       return { command: 'gemini', args: ['--experimental-acp'] }
     case 'goose':
