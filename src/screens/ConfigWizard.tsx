@@ -4,7 +4,7 @@ import { TextInput, ConfirmInput } from '@inkjs/ui'
 import { saveConfig, getConfigPath } from '../services/configService.js'
 import type { OpenRouterModelConfig } from '../services/configService.js'
 
-type Step = 'api-key' | 'model-id' | 'model-name' | 'confirm'
+type Step = 'api-key' | 'proxy-url' | 'model-id' | 'model-name' | 'confirm'
 
 interface Props {
   onDone: () => void
@@ -13,6 +13,7 @@ interface Props {
 export function ConfigWizard({ onDone }: Props) {
   const [step, setStep] = useState<Step>('api-key')
   const [apiKey, setApiKey] = useState('')
+  const [proxyUrl, setProxyUrl] = useState('')
   const [models, setModels] = useState<OpenRouterModelConfig[]>([])
   const [currentId, setCurrentId] = useState('')
   const [saving, setSaving] = useState(false)
@@ -26,6 +27,7 @@ export function ConfigWizard({ onDone }: Props) {
           api_key: apiKey || undefined,
           models,
         },
+        proxy: proxyUrl ? { base_url: proxyUrl } : undefined,
       })
       onDone()
     } catch (err) {
@@ -50,22 +52,38 @@ export function ConfigWizard({ onDone }: Props) {
       {/* Step 1: API key */}
       {step === 'api-key' && (
         <Box flexDirection="column" gap={1}>
-          <Text bold>Step 1/3 — OpenRouter API key</Text>
+          <Text bold>Step 1/4 — OpenRouter API key</Text>
           <Text dimColor>Leave blank to skip (you can set OPENROUTER_API_KEY env var instead)</Text>
           <TextInput
             placeholder="sk-or-v1-..."
             onSubmit={(val) => {
               setApiKey(val.trim())
+              setStep('proxy-url')
+            }}
+          />
+        </Box>
+      )}
+
+      {/* Step 2: LiteLLM proxy URL */}
+      {step === 'proxy-url' && (
+        <Box flexDirection="column" gap={1}>
+          <Text bold>Step 2/4 — LiteLLM proxy URL <Text dimColor>(optional)</Text></Text>
+          <Text dimColor>If you run a local LiteLLM proxy, Claude Code can use non-Claude models.</Text>
+          <Text dimColor>Leave blank to route OpenRouter models directly (Claude-only).</Text>
+          <TextInput
+            placeholder="http://localhost:4000"
+            onSubmit={(val) => {
+              setProxyUrl(val.trim())
               setStep('model-id')
             }}
           />
         </Box>
       )}
 
-      {/* Step 2: Model ID entry loop */}
+      {/* Step 3: Model ID entry loop */}
       {step === 'model-id' && (
         <Box flexDirection="column" gap={1}>
-          <Text bold>Step 2/3 — Add models</Text>
+          <Text bold>Step 3/4 — Add models</Text>
           <Text dimColor>Enter an OpenRouter model ID (e.g. anthropic/claude-opus-4-6)</Text>
           <Text dimColor>Leave blank and press Enter when done</Text>
 
@@ -114,9 +132,10 @@ export function ConfigWizard({ onDone }: Props) {
       {/* Step 3: Confirm */}
       {step === 'confirm' && (
         <Box flexDirection="column" gap={1}>
-          <Text bold>Step 3/3 — Confirm</Text>
+          <Text bold>Step 4/4 — Confirm</Text>
           <Box flexDirection="column" borderStyle="round" paddingX={1}>
             <Text dimColor>API key: <Text color="white">{apiKey ? '***' + apiKey.slice(-4) : '(not set)'}</Text></Text>
+            <Text dimColor>Proxy:   <Text color="white">{proxyUrl || '(not set)'}</Text></Text>
             <Text dimColor>Models: <Text color="white">{models.length === 0 ? '(none)' : ''}</Text></Text>
             {models.map((m) => (
               <Text key={m.id}>  <Text color="green">{m.id}</Text> — {m.name}</Text>

@@ -14,6 +14,9 @@ export interface SkillrunnerConfig {
     api_key?: string
     models?: OpenRouterModelConfig[]
   }
+  proxy?: {
+    base_url: string
+  }
 }
 
 const CONFIG_DIR = join(homedir(), '.config', 'skillrunner')

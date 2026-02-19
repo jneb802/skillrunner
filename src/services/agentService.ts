@@ -48,8 +48,15 @@ async function buildEnv(config: SessionConfig): Promise<Record<string, string>> 
 
   // If model ID contains '/' it's an OpenRouter model (e.g. "anthropic/claude-opus-4")
   if (modelId.includes('/') && openRouterKey) {
-    base['ANTHROPIC_BASE_URL'] = 'https://openrouter.ai/api/v1'
-    base['ANTHROPIC_API_KEY'] = openRouterKey
+    const proxyUrl = fileConfig.proxy?.base_url
+    if (proxyUrl) {
+      // Route Claude Code through a local LiteLLM proxy (supports non-Claude models)
+      base['ANTHROPIC_BASE_URL'] = proxyUrl
+      base['ANTHROPIC_API_KEY'] = openRouterKey
+    } else {
+      base['ANTHROPIC_BASE_URL'] = 'https://openrouter.ai/api/v1'
+      base['ANTHROPIC_API_KEY'] = openRouterKey
+    }
     base['OPENAI_BASE_URL'] = 'https://openrouter.ai/api/v1'
     base['OPENAI_API_KEY'] = openRouterKey
     // Goose native OpenRouter support
