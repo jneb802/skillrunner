@@ -63,6 +63,7 @@ export function SkillPicker({ repoPath, onSelect, onConfigure }: Props) {
       <Text bold color="cyan">Select a skill</Text>
       <Text dimColor>{skills.length} skill(s) found</Text>
       <Select
+        visibleOptionCount={15}
         options={options}
         onChange={(value) => {
           if (value === CONFIGURE_VALUE) {
