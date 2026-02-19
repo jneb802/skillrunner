@@ -3,3 +3,5 @@ dist/
 *.js.map
 .env
 .env.local
+/.claude
+/.agents
