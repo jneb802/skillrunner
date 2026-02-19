@@ -3,7 +3,7 @@ import type { SessionConfig, QueuedRun, QueueSnapshot, RunStore, RunState } from
 import { GitService } from './gitService.js'
 import { GithubService } from './githubService.js'
 import { DockerImageBuilder } from './dockerService.js'
-import { AgentRunner } from './agentService.js'
+import { AgentRunner, type AgentUpdate } from './agentService.js'
 
 class NoOpRunStore implements RunStore {
   async load(): Promise<QueuedRun[]> { return [] }
@@ -151,11 +151,56 @@ export class RunQueue {
     })
   }
 
+  private makeAgentCallback(runId: string) {
+    return (update: AgentUpdate) => {
+      if (update.type === 'output' && update.text) {
+        this.queueOutput(runId, update.text)
+      } else if (update.type === 'tool-start' && update.toolCall) {
+        this.updateRunState(runId, { phase: 'running', toolCalls: [update.toolCall] })
+      } else if ((update.type === 'tool-done' || update.type === 'tool-error') && update.toolCall) {
+        this.updateRunState(runId, { toolCalls: [update.toolCall] })
+      }
+    }
+  }
+
+  private async executeNoWorktreeRun(runId: string, config: SessionConfig, ctrl: AbortController): Promise<void> {
+    this.updateRunPhase(runId, 'starting-agent')
+
+    const steps =
+      config.skill.pipelineSteps && config.skill.pipelineSteps.length > 0
+        ? config.skill.pipelineSteps
+        : [config.skill]
+
+    for (let i = 0; i < steps.length; i++) {
+      if (ctrl.signal.aborted) return
+
+      const step = steps[i]
+      if (steps.length > 1) {
+        this.queueOutput(runId, `\n[${i + 1}/${steps.length}] ${step.name}`)
+      }
+
+      const stepConfig: SessionConfig = { ...config, skill: step }
+      const runner = new AgentRunner()
+      await runner.run(stepConfig, this.makeAgentCallback(runId), ctrl.signal)
+      this.flushOutput(runId)
+    }
+
+    if (!ctrl.signal.aborted) {
+      this.updateRun(runId, { status: 'done', finishedAt: Date.now() })
+    }
+  }
+
   private async executeRun(runId: string, ctrl: AbortController): Promise<void> {
     const run = this.runs.get(runId)!
     const config = { ...run.sessionConfig }
 
     try {
+      // No-worktree mode: run agent(s) directly in repoPath, skip all git steps
+      if (config.noWorktree) {
+        await this.executeNoWorktreeRun(runId, config, ctrl)
+        return
+      }
+
       // Step 1: Create worktree
       this.updateRunPhase(runId, 'creating-worktree')
       const worktreePath = await GitService.createWorktree(
@@ -181,19 +226,7 @@ export class RunQueue {
       // Step 3: Run agent via ACP
       this.updateRunPhase(runId, 'starting-agent')
       const runner = new AgentRunner()
-      await runner.run(
-        config,
-        (update) => {
-          if (update.type === 'output' && update.text) {
-            this.queueOutput(runId, update.text)
-          } else if (update.type === 'tool-start' && update.toolCall) {
-            this.updateRunState(runId, { phase: 'running', toolCalls: [update.toolCall] })
-          } else if ((update.type === 'tool-done' || update.type === 'tool-error') && update.toolCall) {
-            this.updateRunState(runId, { toolCalls: [update.toolCall] })
-          }
-        },
-        ctrl.signal
-      )
+      await runner.run(config, this.makeAgentCallback(runId), ctrl.signal)
       this.flushOutput(runId)
 
       // Step 4: Stage + commit

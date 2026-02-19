@@ -5,6 +5,7 @@ import type {
   AppState, AppAction, Skill, AgentConfig, ModelInfo, SessionConfig, QueueSnapshot,
 } from './types.js'
 import { SkillPicker } from './screens/SkillPicker.js'
+import { ArgumentInput } from './screens/ArgumentInput.js'
 import { AgentPicker } from './screens/AgentPicker.js'
 import { ModelPicker } from './screens/ModelPicker.js'
 import { ConfigReview } from './screens/ConfigReview.js'
@@ -27,13 +28,22 @@ function makeTimestamp(): string {
   ].join('')
 }
 
+function skillNeedsArgument(skill: Skill): boolean {
+  if (skill.argumentPrompt) return true
+  if (skill.pipelineSteps) {
+    return skill.pipelineSteps.some((s) => s.raw.includes('$ARGUMENTS'))
+  }
+  return skill.raw.includes('$ARGUMENTS')
+}
+
 function buildSessionConfig(
   repoPath: string,
   skill: Skill,
   agent: AgentConfig,
   model: ModelInfo,
   useDocker: boolean,
-  dockerfilePath?: string
+  dockerfilePath?: string,
+  argument?: string
 ): SessionConfig {
   const ts = makeTimestamp()
   const skillSlug = skill.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)
@@ -47,6 +57,8 @@ function buildSessionConfig(
     dockerfilePath,
     worktreeName: `${skillSlug}-${ts}`,
     branchName: `skillrunner/${skillSlug}/${ts}`,
+    argument,
+    noWorktree: skill.noWorktree ?? false,
   }
 }
 
@@ -65,8 +77,18 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'OPEN_WIZARD':
       return { ...state, screen: 'config-wizard' }
 
-    case 'SELECT_SKILL':
-      return { ...state, screen: 'agent-picker', skill: action.skill }
+    case 'SELECT_SKILL': {
+      const needsArg = skillNeedsArgument(action.skill)
+      return {
+        ...state,
+        screen: needsArg ? 'argument-input' : 'agent-picker',
+        skill: action.skill,
+        argument: undefined,
+      }
+    }
+
+    case 'SET_ARGUMENT':
+      return { ...state, screen: 'agent-picker', argument: action.argument }
 
     case 'SELECT_AGENT':
       return { ...state, screen: 'model-picker', agent: action.agent }
@@ -80,6 +102,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         screen: 'running',
         selectedRunId: action.runId,
         skill: undefined,
+        argument: undefined,
         agent: undefined,
         model: undefined,
       }
@@ -104,7 +127,11 @@ function reducer(state: AppState, action: AppAction): AppState {
 
     case 'BACK': {
       switch (state.screen) {
-        case 'agent-picker': return { ...state, screen: 'skill-picker' }
+        case 'argument-input': return { ...state, screen: 'skill-picker', skill: undefined, argument: undefined }
+        case 'agent-picker':
+          return state.skill && skillNeedsArgument(state.skill)
+            ? { ...state, screen: 'argument-input' }
+            : { ...state, screen: 'skill-picker' }
         case 'model-picker': return { ...state, screen: 'agent-picker' }
         case 'config-review': return { ...state, screen: 'model-picker' }
         default: return state
@@ -152,14 +179,15 @@ export function App({ repoPath }: Props) {
 
   function buildPreviewConfig(): SessionConfig | null {
     if (!state.skill || !state.agent || !state.model) return null
-    const dockerfilePath = detectDockerTemplate(state.repoPath)
+    const dockerfilePath = state.skill.noWorktree ? undefined : detectDockerTemplate(state.repoPath)
     return buildSessionConfig(
       state.repoPath,
       state.skill,
       state.agent,
       state.model,
       false,
-      dockerfilePath
+      dockerfilePath,
+      state.argument,
     )
   }
 
@@ -177,6 +205,15 @@ export function App({ repoPath }: Props) {
           onConfigure={() => dispatch({ type: 'OPEN_WIZARD' })}
         />
       )
+
+    case 'argument-input':
+      return state.skill ? (
+        <ArgumentInput
+          skill={state.skill}
+          onSubmit={(argument) => dispatch({ type: 'SET_ARGUMENT', argument })}
+          onBack={() => dispatch({ type: 'BACK' })}
+        />
+      ) : null
 
     case 'agent-picker':
       return (
@@ -208,6 +245,7 @@ export function App({ repoPath }: Props) {
               state.model!,
               useDocker,
               previewConfig.dockerfilePath,
+              state.argument,
             )
             const runId = queueRef.current!.enqueue(config)
             dispatch({ type: 'CONFIRM', useDocker, dockerfilePath: config.dockerfilePath, runId })

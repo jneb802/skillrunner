@@ -31,9 +31,14 @@ export function Done({ config, prUrl, error }: Props) {
       )}
       <Box flexDirection="column" borderStyle="round" paddingX={1}>
         <Text dimColor>Skill:  <Text color="green">{config.skill.name}</Text></Text>
+        {config.argument !== undefined && (
+          <Text dimColor>Arg:    <Text color="yellow">{config.argument || '(empty)'}</Text></Text>
+        )}
         <Text dimColor>Agent:  <Text color="green">{config.agent.label}</Text></Text>
         <Text dimColor>Model:  <Text color="green">{config.model.name}</Text></Text>
-        <Text dimColor>Branch: <Text color="green">{config.branchName}</Text></Text>
+        {!config.noWorktree && (
+          <Text dimColor>Branch: <Text color="green">{config.branchName}</Text></Text>
+        )}
       </Box>
       <Text dimColor>Press Ctrl+C to exit</Text>
     </Box>

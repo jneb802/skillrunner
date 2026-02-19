@@ -47,10 +47,14 @@ export function SkillPicker({ repoPath, onSelect, onConfigure }: Props) {
   const CONFIGURE_VALUE = '__configure__'
 
   const options = [
-    ...skills.map((skill) => ({
-      label: `${skill.name}${skill.description ? ` — ${skill.description.slice(0, 60)}` : ''}`,
-      value: skill.skillPath,
-    })),
+    ...skills.map((skill) => {
+      const prefix = skill.pipelineSteps ? '▶ ' : ''
+      const desc = skill.description ? ` — ${skill.description.slice(0, 60)}` : ''
+      return {
+        label: `${prefix}${skill.name}${desc}`,
+        value: skill.skillPath,
+      }
+    }),
     { label: '⚙ Configure OpenRouter...', value: CONFIGURE_VALUE },
   ]
 

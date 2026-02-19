@@ -6,6 +6,9 @@ export interface Skill {
   dirPath: string
   body: string
   raw: string
+  noWorktree?: boolean
+  argumentPrompt?: string
+  pipelineSteps?: Skill[]
 }
 
 export type AgentKind = 'claude' | 'gemini' | 'goose' | 'opencode' | 'custom'
@@ -35,6 +38,8 @@ export interface SessionConfig {
   branchName: string
   worktreePath?: string
   prUrl?: string
+  argument?: string
+  noWorktree?: boolean
 }
 
 export type RunPhase =
@@ -93,6 +98,7 @@ export interface RunStore {
 export type AppScreen =
   | 'config-wizard'
   | 'skill-picker'
+  | 'argument-input'
   | 'agent-picker'
   | 'model-picker'
   | 'config-review'
@@ -103,6 +109,7 @@ export type AppAction =
   | { type: 'WIZARD_DONE' }
   | { type: 'OPEN_WIZARD' }
   | { type: 'SELECT_SKILL'; skill: Skill }
+  | { type: 'SET_ARGUMENT'; argument: string }
   | { type: 'SELECT_AGENT'; agent: AgentConfig }
   | { type: 'SELECT_MODEL'; model: ModelInfo }
   | { type: 'CONFIRM'; useDocker: boolean; dockerfilePath?: string; runId: string }
@@ -117,6 +124,7 @@ export interface AppState {
   repoPath: string
   repoName: string
   skill?: Skill
+  argument?: string
   agent?: AgentConfig
   model?: ModelInfo
   queue: QueueSnapshot

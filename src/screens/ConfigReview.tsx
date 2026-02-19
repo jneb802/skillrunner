@@ -10,7 +10,7 @@ interface Props {
 }
 
 export function ConfigReview({ config, onConfirm, onBack }: Props) {
-  const [dockerStep, setDockerStep] = useState(!!config.dockerfilePath)
+  const [dockerStep, setDockerStep] = useState(!config.noWorktree && !!config.dockerfilePath)
   const [useDocker, setUseDocker] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
 
@@ -42,6 +42,8 @@ export function ConfigReview({ config, onConfirm, onBack }: Props) {
   }
 
   if (!confirmed) {
+    const stepCount = config.skill.pipelineSteps?.length
+
     return (
       <Box flexDirection="column" gap={1}>
         <Text bold color="cyan">Configuration review</Text>
@@ -49,7 +51,16 @@ export function ConfigReview({ config, onConfirm, onBack }: Props) {
           <Box>
             <Text bold dimColor>Skill:      </Text>
             <Text color="green">{config.skill.name}</Text>
+            {stepCount !== undefined && (
+              <Text dimColor> ({stepCount} steps)</Text>
+            )}
           </Box>
+          {config.argument !== undefined && (
+            <Box>
+              <Text bold dimColor>Argument:   </Text>
+              <Text color="yellow">{config.argument || '(empty)'}</Text>
+            </Box>
+          )}
           <Box>
             <Text bold dimColor>Agent:      </Text>
             <Text color="green">{config.agent.label}</Text>
@@ -62,18 +73,28 @@ export function ConfigReview({ config, onConfirm, onBack }: Props) {
             <Text bold dimColor>Repo:       </Text>
             <Text color="green">{config.repoName}</Text>
           </Box>
-          <Box>
-            <Text bold dimColor>Branch:     </Text>
-            <Text color="yellow">{config.branchName}</Text>
-          </Box>
-          <Box>
-            <Text bold dimColor>Worktree:   </Text>
-            <Text color="yellow">{config.worktreeName}</Text>
-          </Box>
-          <Box>
-            <Text bold dimColor>Docker:     </Text>
-            <Text color={useDocker ? 'green' : 'red'}>{useDocker ? 'yes' : 'no'}</Text>
-          </Box>
+          {!config.noWorktree && (
+            <>
+              <Box>
+                <Text bold dimColor>Branch:     </Text>
+                <Text color="yellow">{config.branchName}</Text>
+              </Box>
+              <Box>
+                <Text bold dimColor>Worktree:   </Text>
+                <Text color="yellow">{config.worktreeName}</Text>
+              </Box>
+              <Box>
+                <Text bold dimColor>Docker:     </Text>
+                <Text color={useDocker ? 'green' : 'red'}>{useDocker ? 'yes' : 'no'}</Text>
+              </Box>
+            </>
+          )}
+          {config.noWorktree && (
+            <Box>
+              <Text bold dimColor>Mode:       </Text>
+              <Text color="cyan">in-place (no worktree)</Text>
+            </Box>
+          )}
         </Box>
         <Text>Proceed with these settings?</Text>
         <ConfirmInput

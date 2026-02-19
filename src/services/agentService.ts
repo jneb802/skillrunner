@@ -93,7 +93,7 @@ export class AgentRunner {
     onUpdate: (update: AgentUpdate) => void,
     signal: AbortSignal
   ): Promise<void> {
-    if (!config.worktreePath) throw new Error('worktreePath not set in SessionConfig')
+    const workDir = config.worktreePath ?? config.repoPath
 
     const env = await buildEnv(config)
     const { command, args } = agentCommandAndArgs(config)
@@ -101,12 +101,12 @@ export class AgentRunner {
     const proc = config.useDocker
       ? spawnAgentInDocker({
           imageName: `skillrunner-${config.repoName}:latest`,
-          worktreePath: config.worktreePath,
+          worktreePath: workDir,
           agent: { ...config.agent, command, args },
           env,
         })
       : spawn(command, args, {
-          cwd: config.worktreePath,
+          cwd: workDir,
           stdio: ['pipe', 'pipe', 'inherit'],
           env: { ...process.env, ...env },
         })
@@ -213,7 +213,7 @@ export class AgentRunner {
 
     // Create session
     const sessionResp = await connection.newSession({
-      cwd: config.worktreePath!,
+      cwd: workDir,
       mcpServers: [],
     })
     sessionId = (sessionResp as any).sessionId ?? (sessionResp as any).session_id
@@ -234,10 +234,15 @@ export class AgentRunner {
     onUpdate({ type: 'phase', phase: 'running' })
     onUpdate({ type: 'output', text: `Running skill: ${config.skill.name}\n` })
 
+    // Substitute $ARGUMENTS if an argument was provided
+    const promptText = config.argument
+      ? config.skill.raw.replace(/\$ARGUMENTS/g, config.argument)
+      : config.skill.raw
+
     try {
       await connection.prompt({
         sessionId: sessionId ?? '',
-        prompt: [{ type: 'text', text: config.skill.raw }],
+        prompt: [{ type: 'text', text: promptText }],
       })
     } finally {
       // prompt() returns when the turn is complete; kill the process so
