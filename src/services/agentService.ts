@@ -31,7 +31,7 @@ async function buildEnv(config: SessionConfig): Promise<Record<string, string>> 
 
   // Copy relevant env vars from the current process
   for (const key of [
-    'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY',
+    'GEMINI_API_KEY', 'OPENAI_API_KEY',
     'OPENROUTER_API_KEY', 'PATH', 'HOME', 'USER',
   ]) {
     const val = process.env[key]
