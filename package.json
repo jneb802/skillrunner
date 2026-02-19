@@ -5,7 +5,7 @@
   "bin": { "skillrunner": "./src/index.tsx" },
   "scripts": {
     "dev": "bun run src/index.tsx",
-    "build": "bun build src/index.tsx --outfile dist/skillrunner --target bun",
+    "build": "bun build src/index.tsx --outfile dist/skillrunner --target bun --external react-devtools-core",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
