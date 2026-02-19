@@ -63,6 +63,33 @@ export interface RunState {
   error?: string
 }
 
+export type RunStatus = 'pending' | 'running' | 'done' | 'error' | 'cancelled'
+
+export interface QueuedRun {
+  id: string
+  sessionConfig: SessionConfig
+  status: RunStatus
+  runState: RunState
+  prUrl?: string
+  error?: string
+  enqueuedAt: number
+  startedAt?: number
+  finishedAt?: number
+}
+
+export interface QueueSnapshot {
+  runs: readonly QueuedRun[]
+  concurrency: number
+  activeCount: number
+  pendingCount: number
+}
+
+// Pluggable persistence — no-op by default
+export interface RunStore {
+  load(): Promise<QueuedRun[]>
+  save(runs: QueuedRun[]): Promise<void>
+}
+
 export type AppScreen =
   | 'config-wizard'
   | 'skill-picker'
@@ -78,11 +105,11 @@ export type AppAction =
   | { type: 'SELECT_SKILL'; skill: Skill }
   | { type: 'SELECT_AGENT'; agent: AgentConfig }
   | { type: 'SELECT_MODEL'; model: ModelInfo }
-  | { type: 'CONFIRM'; useDocker: boolean; dockerfilePath?: string }
-  | { type: 'START_RUN' }
-  | { type: 'UPDATE_RUN'; patch: Partial<RunState> }
-  | { type: 'COMPLETE'; prUrl?: string }
-  | { type: 'ERROR'; message: string }
+  | { type: 'CONFIRM'; useDocker: boolean; dockerfilePath?: string; runId: string }
+  | { type: 'QUEUE_UPDATED'; snapshot: QueueSnapshot }
+  | { type: 'VIEW_RUN'; runId: string }
+  | { type: 'CANCEL_RUN'; runId: string }
+  | { type: 'SET_CONCURRENCY'; n: number }
   | { type: 'BACK' }
 
 export interface AppState {
@@ -92,8 +119,7 @@ export interface AppState {
   skill?: Skill
   agent?: AgentConfig
   model?: ModelInfo
-  sessionConfig?: SessionConfig
-  runState?: RunState
-  prUrl?: string
-  error?: string
+  queue: QueueSnapshot
+  concurrency: number
+  selectedRunId?: string
 }

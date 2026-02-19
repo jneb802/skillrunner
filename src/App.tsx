@@ -2,7 +2,7 @@ import React, { useReducer, useEffect, useRef } from 'react'
 import { Box, Text } from 'ink'
 import { basename } from 'path'
 import type {
-  AppState, AppAction, Skill, AgentConfig, ModelInfo, RunState, SessionConfig,
+  AppState, AppAction, Skill, AgentConfig, ModelInfo, SessionConfig, QueueSnapshot,
 } from './types.js'
 import { SkillPicker } from './screens/SkillPicker.js'
 import { AgentPicker } from './screens/AgentPicker.js'
@@ -11,10 +11,7 @@ import { ConfigReview } from './screens/ConfigReview.js'
 import { Running } from './screens/Running.js'
 import { Done } from './screens/Done.js'
 import { ConfigWizard } from './screens/ConfigWizard.js'
-import { GitService } from './services/gitService.js'
-import { GithubService } from './services/githubService.js'
-import { DockerImageBuilder } from './services/dockerService.js'
-import { AgentRunner } from './services/agentService.js'
+import { RunQueue } from './services/runQueue.js'
 import { detectDockerTemplate } from './services/dockerService.js'
 import { configExists } from './services/configService.js'
 
@@ -53,6 +50,13 @@ function buildSessionConfig(
   }
 }
 
+const emptySnapshot: QueueSnapshot = {
+  runs: [],
+  concurrency: 1,
+  activeCount: 0,
+  pendingCount: 0,
+}
+
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'WIZARD_DONE':
@@ -70,77 +74,33 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'SELECT_MODEL':
       return { ...state, screen: 'config-review', model: action.model }
 
-    case 'CONFIRM': {
-      if (!state.skill || !state.agent || !state.model) return state
-      const sessionConfig = buildSessionConfig(
-        state.repoPath,
-        state.skill,
-        state.agent,
-        state.model,
-        action.useDocker,
-        action.dockerfilePath
-      )
+    case 'CONFIRM':
       return {
         ...state,
         screen: 'running',
-        sessionConfig,
-        runState: { phase: 'creating-worktree', output: [], toolCalls: [] },
+        selectedRunId: action.runId,
+        skill: undefined,
+        agent: undefined,
+        model: undefined,
       }
-    }
 
-    case 'UPDATE_RUN': {
-      if (!state.runState) return state
-      const prevRun = state.runState
-      const patch = action.patch
-
-      let toolCalls = prevRun.toolCalls
-      if (patch.toolCalls !== undefined) {
-        const updated = [...toolCalls]
-        for (const tc of patch.toolCalls) {
-          const idx = updated.findIndex((t) => t.id === tc.id)
-          if (idx >= 0) updated[idx] = { ...updated[idx], ...tc }
-          else updated.push(tc)
+    case 'QUEUE_UPDATED': {
+      const next = { ...state, queue: action.snapshot }
+      // Auto-transition running → done when the selected run finishes
+      if (state.screen === 'running' && state.selectedRunId) {
+        const run = action.snapshot.runs.find(r => r.id === state.selectedRunId)
+        if (run && (run.status === 'done' || run.status === 'error' || run.status === 'cancelled')) {
+          next.screen = 'done'
         }
-        toolCalls = updated
       }
-
-      let output = prevRun.output
-      if (patch.output !== undefined && patch.output.length > 0) {
-        output = [...prevRun.output, ...patch.output]
-      }
-
-      return {
-        ...state,
-        runState: {
-          ...prevRun,
-          ...patch,
-          toolCalls,
-          output,
-          // partialLine: use patch value if present, keep prev otherwise
-          partialLine: 'partialLine' in patch ? patch.partialLine : prevRun.partialLine,
-        },
-      }
+      return next
     }
 
-    case 'COMPLETE':
-      return {
-        ...state,
-        screen: 'done',
-        prUrl: action.prUrl,
-        sessionConfig: state.sessionConfig
-          ? { ...state.sessionConfig, prUrl: action.prUrl }
-          : state.sessionConfig,
-      }
+    case 'VIEW_RUN':
+      return { ...state, selectedRunId: action.runId }
 
-    case 'ERROR':
-      return {
-        ...state,
-        screen: 'done',
-        error: action.message,
-        runState: state.runState
-          ? { ...state.runState, error: action.message }
-          : state.runState,
-      }
+    case 'SET_CONCURRENCY':
+      return { ...state, concurrency: action.n }
 
     case 'BACK': {
       switch (state.screen) {
@@ -161,6 +121,8 @@ function initState(repoPath: string): AppState {
     screen: configExists() ? 'skill-picker' : 'config-wizard',
     repoPath,
     repoName: basename(repoPath),
+    queue: emptySnapshot,
+    concurrency: 1,
   }
 }
 
@@ -170,182 +132,24 @@ interface Props {
 
 export function App({ repoPath }: Props) {
   const [state, dispatch] = useReducer(reducer, repoPath, initState)
-  const abortRef = useRef<AbortController | null>(null)
-  // completed lines waiting to be flushed to state
-  const completedBuffer = useRef<string[]>([])
-  // current line being built (no newline yet)
-  const partialLineRef = useRef('')
-  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  function flushOutput() {
-    const lines = completedBuffer.current.splice(0)
-    const partial = partialLineRef.current || undefined
-    if (lines.length > 0 || partial !== undefined) {
-      dispatch({ type: 'UPDATE_RUN', patch: { output: lines, partialLine: partial } })
-    }
+  const queueRef = useRef<RunQueue | null>(null)
+  if (queueRef.current === null) {
+    queueRef.current = new RunQueue({
+      concurrency: 1,
+      onStateChange: (snapshot) => dispatch({ type: 'QUEUE_UPDATED', snapshot }),
+    })
   }
 
-  function queueOutput(text: string) {
-    if (!text) return
-    const combined = partialLineRef.current + text
-    const parts = combined.split('\n')
-    // last part is the new partial (may be '')
-    partialLineRef.current = parts[parts.length - 1]
-    // everything before the last part is complete lines
-    completedBuffer.current.push(...parts.slice(0, -1))
-
-    if (!flushTimer.current) {
-      flushTimer.current = setTimeout(() => {
-        flushOutput()
-        flushTimer.current = null
-      }, 50)
-    }
-  }
-
-  // Run the full orchestration once the screen transitions to 'running'
-  const hasStartedRun = useRef(false)
   useEffect(() => {
-    if (state.screen !== 'running' || !state.sessionConfig || hasStartedRun.current) return
-    hasStartedRun.current = true
-
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-
-    async function run() {
-      // config is a mutable local copy so we can set worktreePath
-      const config = { ...state.sessionConfig! }
-
-      try {
-        // Step 1: Create worktree
-        dispatch({ type: 'UPDATE_RUN', patch: { phase: 'creating-worktree' } })
-        const worktreePath = await GitService.createWorktree(
-          config.repoPath,
-          config.worktreeName,
-          config.branchName,
-          true
-        )
-        config.worktreePath = worktreePath
-        queueOutput(`Worktree created: ${worktreePath}`)
-
-        // Step 2: Build Docker image if needed
-        if (config.useDocker && config.dockerfilePath) {
-          dispatch({ type: 'UPDATE_RUN', patch: { phase: 'building-docker' } })
-          const builder = new DockerImageBuilder()
-          builder.on('progress', (text: string) => queueOutput(text))
-          const tag = `skillrunner-${config.repoName}:latest`
-          const result = await builder.ensureImage(tag, config.dockerfilePath, config.repoPath)
-          if (!result.success) throw new Error(`Docker build failed: ${result.error}`)
-          if (result.built) queueOutput(`Docker image ${tag} built successfully`)
-        }
-
-        // Step 3: Run agent via ACP
-        dispatch({ type: 'UPDATE_RUN', patch: { phase: 'starting-agent' } })
-        const runner = new AgentRunner()
-        await runner.run(
-          config,
-          (update) => {
-            if (update.type === 'output' && update.text) {
-              queueOutput(update.text)
-            } else if (update.type === 'tool-start' && update.toolCall) {
-              dispatch({ type: 'UPDATE_RUN', patch: { phase: 'running', toolCalls: [update.toolCall] } })
-            } else if ((update.type === 'tool-done' || update.type === 'tool-error') && update.toolCall) {
-              dispatch({ type: 'UPDATE_RUN', patch: { toolCalls: [update.toolCall] } })
-            }
-          },
-          ctrl.signal
-        )
-        flushOutput()
-
-        // Step 4: Stage + commit
-        dispatch({ type: 'UPDATE_RUN', patch: { phase: 'committing' } })
-        await GitService.stageAll(worktreePath)
-        try {
-          await GitService.commit(
-            worktreePath,
-            `skillrunner: ${config.skill.name} via ${config.agent.label} (${config.model.id})`
-          )
-        } catch (err) {
-          // Nothing to commit is OK
-          const msg = err instanceof Error ? err.message : String(err)
-          if (!msg.includes('nothing to commit')) throw err
-          queueOutput('No changes to commit')
-        }
-
-        // Step 5: Push
-        dispatch({ type: 'UPDATE_RUN', patch: { phase: 'pushing' } })
-        try {
-          await GitService.push(worktreePath, config.branchName)
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          if (!msg.includes('nothing to commit')) {
-            queueOutput(`Push warning: ${msg}`)
-          }
-        }
-
-        // Step 6: Create PR
-        let prUrl: string | undefined
-        const ghAvailable = await GithubService.isGhAvailable()
-        const isGithub = await GithubService.isGithubRepo(config.repoPath)
-
-        if (ghAvailable && isGithub) {
-          dispatch({ type: 'UPDATE_RUN', patch: { phase: 'creating-pr' } })
-          prUrl = await GithubService.createPr(
-            config.repoPath,
-            config.branchName,
-            `skillrunner: ${config.skill.name}`,
-            [
-              'Automated run via skillrunner',
-              '',
-              `- Skill: ${config.skill.name}`,
-              `- Agent: ${config.agent.label}`,
-              `- Model: ${config.model.id}`,
-            ].join('\n')
-          )
-        } else {
-          queueOutput('Skipping PR creation (gh not available or not a GitHub repo)')
-        }
-
-        // Step 7: Remove worktree
-        dispatch({ type: 'UPDATE_RUN', patch: { phase: 'removing-worktree' } })
-        await GitService.removeWorktree(config.repoPath, worktreePath)
-
-        flushOutput()
-        dispatch({ type: 'COMPLETE', prUrl })
-      } catch (err) {
-        if (ctrl.signal.aborted) return
-        flushOutput()
-        let message: string
-        if (err instanceof Error) {
-          message = err.message
-        } else if (err && typeof err === 'object') {
-          const o = err as Record<string, unknown>
-          message = typeof o['message'] === 'string'
-            ? o['message']
-            : JSON.stringify(err)
-        } else {
-          message = String(err)
-        }
-        dispatch({ type: 'ERROR', message })
-      }
-    }
-
-    run()
-
-    return () => {
-      ctrl.abort()
-      if (flushTimer.current) {
-        clearTimeout(flushTimer.current)
-        flushTimer.current = null
-      }
-    }
-  }, [state.screen])
+    queueRef.current!.hydrate()
+    return () => queueRef.current!.destroy()
+  }, [])
 
   function handleCancel() {
-    abortRef.current?.abort()
-    dispatch({ type: 'ERROR', message: 'Cancelled by user' })
+    if (state.selectedRunId) queueRef.current!.cancel(state.selectedRunId)
   }
 
-  // Build a preview config for ConfigReview before CONFIRM
   function buildPreviewConfig(): SessionConfig | null {
     if (!state.skill || !state.agent || !state.model) return null
     const dockerfilePath = detectDockerTemplate(state.repoPath)
@@ -396,33 +200,36 @@ export function App({ repoPath }: Props) {
       return previewConfig ? (
         <ConfigReview
           config={previewConfig}
-          onConfirm={(useDocker) =>
-            dispatch({
-              type: 'CONFIRM',
+          onConfirm={(useDocker) => {
+            const config = buildSessionConfig(
+              state.repoPath,
+              state.skill!,
+              state.agent!,
+              state.model!,
               useDocker,
-              dockerfilePath: previewConfig.dockerfilePath,
-            })
-          }
+              previewConfig.dockerfilePath,
+            )
+            const runId = queueRef.current!.enqueue(config)
+            dispatch({ type: 'CONFIRM', useDocker, dockerfilePath: config.dockerfilePath, runId })
+          }}
           onBack={() => dispatch({ type: 'BACK' })}
         />
       ) : null
     }
 
-    case 'running':
-      return state.runState ? (
-        <Running runState={state.runState} onCancel={handleCancel} />
-      ) : null
+    case 'running': {
+      const run = state.queue.runs.find(r => r.id === state.selectedRunId)
+      return run ? <Running runState={run.runState} onCancel={handleCancel} /> : null
+    }
 
-    case 'done':
-      return state.sessionConfig ? (
-        <Done
-          config={state.sessionConfig}
-          prUrl={state.prUrl}
-          error={state.error}
-        />
+    case 'done': {
+      const run = state.queue.runs.find(r => r.id === state.selectedRunId)
+      return run ? (
+        <Done config={run.sessionConfig} prUrl={run.prUrl} error={run.error} />
       ) : (
-        <Text color="red">{state.error ?? 'Unknown error'}</Text>
+        <Text color="red">Run not found</Text>
       )
+    }
 
     default:
       return <Text>Unknown screen</Text>

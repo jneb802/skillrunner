@@ -1,6 +1,6 @@
 {
   "database": "dolt",
-  "jsonl_export": "issues.jsonl",
+  "jsonl_export": "beads.jsonl",
   "backend": "dolt",
-  "dolt_database": "beads_skillrunner"
+  "dolt_database": "beads"
 }
