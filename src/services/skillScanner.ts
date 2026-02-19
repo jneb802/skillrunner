@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'fs/promises'
+import { readdir, readFile, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join, basename } from 'path'
 import { parse as parseYaml } from 'yaml'
@@ -54,6 +54,12 @@ async function parseSkillFile(filePath: string, dirPath: string): Promise<Skill 
   }
 }
 
+async function parseSkillDir(dirPath: string, parentDir: string): Promise<Skill | null> {
+  const skillMdPath = join(dirPath, 'SKILL.md')
+  if (!existsSync(skillMdPath)) return null
+  return parseSkillFile(skillMdPath, parentDir)
+}
+
 async function scanDir(skillDir: string): Promise<Skill[]> {
   if (!existsSync(skillDir)) return []
 
@@ -66,10 +72,21 @@ async function scanDir(skillDir: string): Promise<Skill[]> {
 
   const skills: Skill[] = []
   for (const entry of entries) {
-    if (!entry.match(/\.(md|txt|yaml|yml)$/)) continue
-    const filePath = join(skillDir, entry)
-    const skill = await parseSkillFile(filePath, skillDir)
-    if (skill) skills.push(skill)
+    const fullPath = join(skillDir, entry)
+    let s: import('fs').Stats
+    try {
+      s = await stat(fullPath)
+    } catch {
+      continue
+    }
+
+    if (s.isDirectory()) {
+      const skill = await parseSkillDir(fullPath, skillDir)
+      if (skill) skills.push(skill)
+    } else if (entry.match(/\.(md|txt|yaml|yml)$/)) {
+      const skill = await parseSkillFile(fullPath, skillDir)
+      if (skill) skills.push(skill)
+    }
   }
   return skills
 }
