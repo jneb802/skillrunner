@@ -45,9 +45,11 @@ async function buildEnv(config: SessionConfig): Promise<Record<string, string>> 
 
   const modelId = config.model.id
   const openRouterKey = base['OPENROUTER_API_KEY']
+  const configuredModels = fileConfig.openrouter?.models ?? []
+  const isConfiguredModel = configuredModels.some((m) => m.id === modelId)
 
-  // If model ID contains '/' it's an OpenRouter model (e.g. "anthropic/claude-opus-4")
-  if (modelId.includes('/') && openRouterKey) {
+  // If model is in the configured openrouter/proxy list, route accordingly
+  if (isConfiguredModel && openRouterKey) {
     const proxyUrl = fileConfig.proxy?.base_url
     if (proxyUrl) {
       // Route Claude Code through a local LiteLLM proxy (supports non-Claude models)
